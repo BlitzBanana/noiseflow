@@ -1,7 +1,7 @@
 use nannou::{
     noise::{
         utils::{NoiseMap, NoiseMapBuilder, PlaneMapBuilder},
-        Perlin, Seedable,
+        OpenSimplex, Seedable,
     },
     prelude::*,
 };
@@ -32,17 +32,21 @@ struct Model {
 }
 
 struct Settings {
+    paused: bool,
     noise_seed: u32,
     draw_background: bool,
     draw_particles: bool,
     draw_flowfield: bool,
     particle_count: usize,
+    particle_velocity: f32,
     particle_size: f32,
+    particle_steer: f32,
+    particle_flow_force: f32,
 }
 
 struct Particle {
     position: Vec2,
-    acceleration: Vec2,
+    velocity: Vec2,
 }
 
 impl Model {
@@ -54,11 +58,11 @@ impl Model {
     }
 
     fn generate_map(seed: u32, bounds: &Rect) -> NoiseMap {
-        let noise = Perlin::new().set_seed(seed);
+        let noise = OpenSimplex::new().set_seed(seed);
         let map = PlaneMapBuilder::new(&noise)
             .set_size(bounds.w() as usize, bounds.h() as usize)
-            .set_x_bounds(-2., 2.)
-            .set_y_bounds(-2., 2.)
+            .set_x_bounds(-3., 3.)
+            .set_y_bounds(-3., 3.)
             .set_is_seamless(true)
             .build();
 
@@ -80,7 +84,7 @@ impl Model {
 
                 Particle {
                     position: origin + x + y,
-                    acceleration: Vec2::ZERO,
+                    velocity: Vec2::ZERO,
                 }
             })
             .collect();
@@ -94,6 +98,7 @@ fn model(app: &App) -> Model {
         .new_window()
         .view(view)
         .size(WINDOW_WIDTH as u32, WINDOW_HEIGHT as u32)
+        .resizable(false)
         .raw_event(raw_window_event)
         .build()
         .unwrap();
@@ -102,12 +107,16 @@ fn model(app: &App) -> Model {
     let egui = Egui::from_window(&window);
 
     let settings = Settings {
+        paused: false,
         noise_seed: random_range(0, u32::MAX),
         draw_background: true,
         draw_particles: true,
         draw_flowfield: false,
         particle_count: 400,
+        particle_velocity: 1.,
         particle_size: 1.0,
+        particle_steer: 0.1,
+        particle_flow_force: 1.0,
     };
 
     let bounds = app
@@ -159,10 +168,17 @@ fn update(_app: &App, model: &mut Model, update: Update) {
                 Model::generate_particles(model.settings.particle_count, &model.bounds);
         }
 
+        ui.add(egui::Slider::new(&mut model.settings.particle_size, 0.1..=50.0).text("size"));
+
         ui.add(
-            egui::Slider::new(&mut model.settings.particle_size, 0.1..=100.0)
-                .text("size")
-                .logarithmic(true),
+            egui::Slider::new(&mut model.settings.particle_velocity, 0.0..=10.0).text("velocity"),
+        );
+
+        ui.add(egui::Slider::new(&mut model.settings.particle_steer, 0.0..=1.0).text("steering"));
+
+        ui.add(
+            egui::Slider::new(&mut model.settings.particle_flow_force, 0.0..=1.0)
+                .text("flow force"),
         );
 
         ui.label("Rendering:");
@@ -178,9 +194,16 @@ fn update(_app: &App, model: &mut Model, update: Update) {
             &mut model.settings.draw_flowfield,
             "flowfield",
         ));
+
+        ui.label("Sim:");
+        ui.add(egui::Checkbox::new(&mut model.settings.paused, "Pause"));
     });
 
     frame.end();
+
+    if model.settings.paused {
+        return;
+    }
 
     // Update particles
     let particles: Vec<Particle> = model
@@ -190,14 +213,26 @@ fn update(_app: &App, model: &mut Model, update: Update) {
             let deltatime = update.since_last.as_secs_f32() * 100.;
 
             let direction = model.sample_direction(particle.position.x, particle.position.y);
-            let direction = direction.clamp_length_max(0.04); // Limit current flow field direction influence
+            let direction = direction * model.settings.particle_flow_force;
 
-            let acceleration = particle.acceleration + direction;
-            let acceleration = acceleration.clamp_length_max(1.); // Limit max acceleration
+            let inertia = particle.velocity * (1.0 - model.settings.particle_flow_force);
+
+            let steer = direction + inertia;
+            let steer = steer.clamp_length(
+                particle.velocity.length().max(1.0),
+                particle.velocity.length().max(1.0),
+            );
+
+            let velocity = particle.velocity * (1.0 - model.settings.particle_steer)
+                + steer * model.settings.particle_steer;
+            let velocity = velocity.clamp_length(
+                model.settings.particle_velocity,
+                model.settings.particle_velocity,
+            );
 
             let mut particle = Particle {
-                position: particle.position + acceleration * deltatime,
-                acceleration,
+                position: particle.position + velocity * deltatime,
+                velocity,
             };
 
             let (width, height) = model.bounds.w_h();
@@ -236,7 +271,9 @@ fn view(app: &App, model: &Model, frame: Frame) {
     if model.settings.draw_flowfield {
         for x in -1..GRID_WIDTH as i32 + 1 {
             for y in -1..GRID_HEIGHT as i32 + 1 {
-                let cell = Vec2::new(x as f32 * CELL_WIDTH as f32, y as f32 * CELL_HEIGHT as f32);
+                let x = x as f32 * CELL_WIDTH as f32;
+                let y = y as f32 * CELL_HEIGHT as f32;
+                let cell = Vec2::new(x, y);
                 let direction = model.sample_direction(cell.x, cell.y);
 
                 let start = origin + cell;
