@@ -145,25 +145,25 @@ fn view(app: &App, model: &Model, frame: Frame) {
     let origin = model.bounds.bottom_left();
 
     // Render flow field arrows
-    for x in -1..GRID_WIDTH as i32 + 1 {
-        for y in -1..GRID_HEIGHT as i32 + 1 {
-            let cell = Vec2::new(x as f32 * CELL_WIDTH as f32, y as f32 * CELL_HEIGHT as f32);
-            let direction = model.sample_direction(cell.x, cell.y);
+    // for x in -1..GRID_WIDTH as i32 + 1 {
+    //     for y in -1..GRID_HEIGHT as i32 + 1 {
+    //         let cell = Vec2::new(x as f32 * CELL_WIDTH as f32, y as f32 * CELL_HEIGHT as f32);
+    //         let direction = model.sample_direction(cell.x, cell.y);
 
-            let start = origin + cell;
-            let end = start + direction * 8.0;
+    //         let start = origin + cell;
+    //         let end = start + direction * 8.0;
 
-            draw.arrow().start(start).end(end).color(DARKGRAY);
-        }
-    }
+    //         draw.arrow().start(start).end(end).color(DARKGRAY);
+    //     }
+    // }
 
     // Render all particles
-    // for particle in model.particles.iter() {
-    //     draw.ellipse()
-    //         .xy(origin + particle.position)
-    //         .w_h(4.0, 4.0)
-    //         .color(PLUM);
-    // }
+    for particle in model.particles.iter() {
+        draw.ellipse()
+            .xy(origin + particle.position)
+            .w_h(4.0, 4.0)
+            .color(PLUM);
+    }
 
     draw.to_frame(app, &frame).unwrap();
 }
